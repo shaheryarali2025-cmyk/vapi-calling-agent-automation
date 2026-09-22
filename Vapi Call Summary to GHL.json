@@ -1,0 +1,398 @@
+{
+  "name": "Vapi Call Summary to GHL",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vapi-end-of-call",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -224,
+        0
+      ],
+      "id": "92e46e33-61bd-4dd2-89fa-448f3257bae7",
+      "name": "Vapi End of Call Webhook",
+      "webhookId": "7500ff55-d972-4965-8a54-07b320985c58"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "3517d4c0-0db2-4711-baf3-c9860ae1f312",
+              "leftValue": "={{   $json.body?.message?.type === 'end-of-call-report'   &&   Boolean(     $json.body?.message?.analysis?.summary     ||     $json.body?.message?.summary   )   &&   Boolean(     $json.body?.message?.artifact?.transcript     ||     $json.body?.message?.transcript   ) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        0,
+        0
+      ],
+      "id": "ace921b8-2e1a-4a6f-bc8d-d2c96ed9c746",
+      "name": "Final Vapi Report Ready"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $json;\n\n// Main Vapi payload sections\nconst message = input.body?.message ?? {};\nconst call = message.call ?? {};\nconst analysis = message.analysis ?? {};\nconst artifact = message.artifact ?? {};\n\n// Vapi variables possible locations se read karein\nconst variables =\n  call.assistantOverrides?.variableValues ??\n  artifact.variableValues ??\n  artifact.variables ??\n  message.variableValues ??\n  {};\n\n// Original GHL Contact ID find karein\nconst contactId =\n  message.customer?.externalId ??\n  message.customer?.metadata?.ghl_contact_id ??\n  call.customer?.externalId ??\n  call.customer?.metadata?.ghl_contact_id ??\n  call.metadata?.ghl_contact_id ??\n  variables.ghl_contact_id ??\n  variables.Contact_ID ??\n  variables.contact_id ??\n  \"\";\n\nif (!contactId) {\n  throw new Error(\n    \"Original GHL Contact ID not found in Vapi payload.\"\n  );\n}\n\n// Vapi call ID\nconst callId =\n  call.id ??\n  input.headers?.[\"x-call-id\"] ??\n  String(message.timestamp ?? \"\");\n\nif (!callId) {\n  throw new Error(\n    \"Vapi Call ID was not found in the webhook payload.\"\n  );\n}\n\n// Duplicate protection key\nconst dedupeKey = `vapi-end-of-call-${callId}`;\n\n// Call summary\nconst summary =\n  analysis.summary ??\n  message.summary ??\n  call.analysis?.summary ??\n  \"Call summary was not available.\";\n\n// Call ending information\nconst endedReason =\n  message.endedReason ??\n  call.endedReason ??\n  \"\";\n\nconst callStatus =\n  message.status ??\n  call.status ??\n  \"\";\n\n// Transcript\nconst transcript =\n  artifact.transcript ??\n  message.transcript ??\n  \"\";\n\n// Searchable call text\nconst haystack = [\n  summary,\n  transcript,\n  endedReason,\n  callStatus,\n]\n  .filter(Boolean)\n  .join(\" \");\n\n// Do-not-call detection\nconst doNotCall =\n  /\\b(stop calling|do not call|don't call|wrong number|remove me|unsubscribe)\\b/i\n    .test(haystack);\n\n// Human follow-up detection\nconst humanFollowup =\n  !doNotCall &&\n  /\\b(call me back|human follow[- ]?up|speak to a human|speak with a human|talk to a person|speak to a person|talk to a representative|team member follow up|someone from the team follow up|have someone follow up)\\b/i\n    .test(haystack);\n\n// Unreachable-call detection\nconst unreachable =\n  !doNotCall &&\n  !humanFollowup &&\n  /\\b(no answer|voicemail|busy|failed|unreachable|answering machine)\\b/i\n    .test(haystack);\n\n// Final call outcome\nconst aiCallOutcome = doNotCall\n  ? \"Do Not Call\"\n  : humanFollowup\n    ? \"Human Follow-up\"\n    : unreachable\n      ? \"Unreachable\"\n      : \"Completed\";\n\n// Optional GHL tag\nconst tagName = humanFollowup\n  ? \"ai-human-followup\"\n  : doNotCall\n    ? \"ai-do-not-call\"\n    : unreachable\n      ? \"ai-unreachable\"\n      : \"\";\n\n// GHL note body\nconst noteBody = [\n  `VAPI call: ${callId}`,\n  `Outcome: ${aiCallOutcome}`,\n  `Summary: ${summary}`,\n  `Ended reason: ${endedReason || \"Not provided\"}`,\n].join(\"\\n\");\n\n// Code node is set to \"Run Once for Each Item\",\n// therefore return one object, not an array.\nreturn {\n  json: {\n    ...input,\n\n    ghl_contact_id: contactId,\n    call_id: callId,\n\n    // Used by Remove Duplicates node\n    dedupe_key: dedupeKey,\n\n    call_summary: summary,\n    ended_reason: endedReason,\n    call_status: callStatus,\n\n    ai_call_outcome: aiCallOutcome,\n    human_followup: humanFollowup,\n    do_not_call: doNotCall,\n    unreachable,\n\n    note_body: noteBody,\n    tag_name: tagName,\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        -96
+      ],
+      "id": "d3afea32-be3b-4ce9-bf7e-62d62312aa8b",
+      "name": "Prepare GHL Call Note"
+    },
+    {
+      "parameters": {
+        "operation": "removeItemsSeenInPreviousExecutions",
+        "dedupeValue": "={{ $json.dedupe_key }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.removeDuplicates",
+      "typeVersion": 2,
+      "position": [
+        448,
+        -96
+      ],
+      "id": "98a150c0-c933-4f80-a0bc-90797bdc19dc",
+      "name": "Remove Duplicates"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{   'https://services.leadconnectorhq.com/contacts/' +   encodeURIComponent($json.ghl_contact_id) +   '/notes' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "=application/json"
+            },
+            {
+              "name": "Version",
+              "value": "v3"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  {\n    body: $json.note_body\n  }\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        672,
+        -192
+      ],
+      "id": "8396fb2f-8da7-4cd8-96fe-2f1a84f69133",
+      "name": "Create Vapi Note in GHL",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "4PxVpytRmTVKJOvg",
+          "name": "Bearer Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        224,
+        96
+      ],
+      "id": "d46dfeca-34d5-4851-b2c0-6c7c2dac8ac7",
+      "name": "No Operation, do nothing"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=={{ $json.tag_name ? 'https://services.leadconnectorhq.com/contacts/' + encodeURIComponent($json.ghl_contact_id) + '/tags' : 'https://127.0.0.1:9/seal-tech-no-tag' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { tags: [$json.tag_name] } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        896,
+        -192
+      ],
+      "id": "5b968713-bdaa-45c3-9e9c-425f145a7670",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "4PxVpytRmTVKJOvg",
+          "name": "Bearer Auth account 2"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ $json.ghl_contact_id }}/appointments",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "v3"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer pit-971b02f7-ed9d-45f6-a917-6032d0888e26"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        672,
+        0
+      ],
+      "id": "feacf27b-f155-429f-9d1f-22437aca8518",
+      "name": "Check GHL Appointments"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "99f2bb80-d0d9-40b8-ab3a-d0b99eb8ac28",
+              "leftValue": "={{ Array.isArray($json.events) && $json.events.length > 0 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        896,
+        0
+      ],
+      "id": "e96b25f5-1059-4904-84e6-bea11824c059",
+      "name": "Appointment Booked?"
+    },
+    {
+      "parameters": {
+        "amount": 4,
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        96
+      ],
+      "id": "af7c32b7-d03f-4486-9487-ccaa23c9e7bd",
+      "name": "Wait",
+      "webhookId": "bd28e33c-869c-404d-b0c2-dee491de7d8a"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        -96
+      ],
+      "id": "f2a898ef-60c3-4aa2-9cb7-2c6016a6ea17",
+      "name": "No Operation, do nothing1"
+    },
+    {
+      "parameters": {
+        "from": "+13236884880",
+        "to": "={{ $('Remove Duplicates').first().json.body.message.call.customer.number }}",
+        "message": "=Hello {{ $('Remove Duplicates').first().json.body.message.call.assistantOverrides.variableValues.first_name }},\n\nWe noticed that you haven't scheduled your roof inspection yet. Take your time, but not too long 😉\n\nYou can book your free roof inspection here:\nhttps://api.leadconnectorhq.com/widget/bookings/sealtechcontractocalendar\n\nIt only takes a minute.\n\nReply STOP to opt out.",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        1344,
+        96
+      ],
+      "id": "5ee94e18-f230-45e0-9ab9-ce534d517945",
+      "name": "Send an SMS/MMS/WhatsApp message",
+      "credentials": {
+        "twilioApi": {
+          "id": "1LRJgwsCWBzHTcYy",
+          "name": "Twilio account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Vapi End of Call Webhook": {
+      "main": [
+        [
+          {
+            "node": "Final Vapi Report Ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Vapi Report Ready": {
+      "main": [
+        [
+          {
+            "node": "Prepare GHL Call Note",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Operation, do nothing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare GHL Call Note": {
+      "main": [
+        [
+          {
+            "node": "Remove Duplicates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove Duplicates": {
+      "main": [
+        [
+          {
+            "node": "Create Vapi Note in GHL",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check GHL Appointments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Vapi Note in GHL": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check GHL Appointments": {
+      "main": [
+        [
+          {
+            "node": "Appointment Booked?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Appointment Booked?": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Send an SMS/MMS/WhatsApp message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "4419ce88-abed-4df2-8611-ebb85bed198d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "adfe57bac2d7438517633d2c1f6ded22e16dbad7acbdad4f2a95887b82bb26da"
+  },
+  "nodeGroups": [],
+  "id": "Lghuh85QbfmsKM9w",
+  "tags": []
+}

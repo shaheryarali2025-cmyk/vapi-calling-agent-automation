@@ -1,0 +1,303 @@
+SEAL TECH AUTOMATION PROJECT — PERSONAL UNDERSTANDING NOTES
+===========================================================
+
+1. PROJECT PURPOSE
+------------------
+This project was built to automate the lead follow-up and appointment booking process for SEAL TECH Roof Restoration.
+
+Main goal:
+- A homeowner fills out a lead / free roof inspection form.
+- The contact is created in GoHighLevel (GHL).
+- Customer data is sent automatically to n8n.
+- n8n sends the customer data to Vapi.
+- Vapi's AI calling agent "Laura" calls the homeowner.
+- Laura checks real GHL calendar availability during the call.
+- If the customer selects a slot, n8n creates the appointment in GHL.
+- Confirmation emails and SMS messages are sent automatically.
+- After the call, the final call summary is saved back into the same GHL contact.
+
+This project mainly connects:
+GHL + n8n + Vapi + Twilio + IONOS SMTP.
+
+
+2. MAIN TOOLS / PLATFORMS USED
+------------------------------
+
+A) GoHighLevel (GHL)
+Purpose:
+- Lead form / inspection form
+- Contact creation
+- Contact custom fields
+- Customer data storage
+- Calendar
+- Appointment storage
+- Contact notes / tasks
+- GHL workflow automation
+- Webhook to n8n
+
+Important data coming from GHL:
+- First name
+- Full name
+- Phone
+- Email
+- Contact ID
+- Property address
+- Homeowner status
+- Roof type
+
+
+B) n8n
+Purpose:
+n8n is the main automation bridge between GHL, Vapi, Twilio and email.
+
+It is used for:
+- Receiving GHL webhooks
+- Getting the complete GHL contact
+- Preparing variables for Vapi
+- Starting the Vapi outbound call
+- Receiving Vapi tool calls during the call
+- Getting free GHL calendar slots
+- Filtering appointment slots
+- Creating GHL appointments
+- Sending appointment results back to Vapi
+- Sending confirmation emails
+- Sending Twilio SMS
+- Receiving Vapi end-of-call reports
+- Saving call notes / tasks in GHL
+- Preventing duplicate call reports
+- Checking whether an appointment exists before sending a reminder SMS
+
+
+C) Vapi
+Purpose:
+Vapi runs the AI phone agent "Laura".
+
+Laura:
+- Calls the lead automatically
+- Uses the customer variables sent from n8n
+- Confirms customer information
+- Qualifies the lead
+- Asks for appointment day/time preference
+- Calls n8n tools to check availability
+- Offers only real available slots
+- Sends the selected slot back to n8n for booking
+- Confirms the appointment after successful GHL booking
+- Sends an end-of-call report to n8n
+
+
+D) Twilio
+Purpose:
+- Phone number used for Vapi calling
+- SMS messaging
+
+Twilio A2P 10DLC was configured and approved.
+
+SMS logic:
+SMS #1:
+- Sent after the form is submitted
+- Lets the homeowner know Laura will call shortly
+- Includes the SEAL TECH website link
+- Includes "Reply STOP to opt out"
+
+SMS #2:
+- Sent after Laura's first call ONLY if no appointment was booked
+- Current test wait was around 8 minutes
+- Contains the public GHL booking link
+- Reminds the customer to schedule
+- Includes "Reply STOP to opt out"
+
+For production, it is safer to re-check GHL after the wait before sending SMS #2.
+
+
+E) IONOS SMTP
+Purpose:
+Used to send branded appointment confirmation emails.
+
+Emails include:
+- Customer name
+- Appointment date/time
+- Property address
+- SEAL TECH branding
+
+Additional internal emails were also prepared for:
+- Ray
+- Contractor / Samir
+
+
+F) Google Sheets
+Google Sheets was not a core part of the implementation discussed in this project chat.
+If Sheets is used elsewhere, it would most likely be for reporting, logging, lead tracking, or manual review.
+
+
+G) OpenClaw
+OpenClaw was not part of the actual implementation discussed in this project chat.
+The automation documented here was mainly built with GHL, n8n, Vapi, Twilio and IONOS SMTP.
+
+
+3. MAIN AUTOMATION FLOWS
+------------------------
+
+FLOW 1 — GHL CONTACT TO VAPI CALL
+---------------------------------
+Form submitted
+→ GHL contact created
+→ GHL workflow runs
+→ GHL Custom Webhook
+→ n8n Webhook
+→ Get full GHL contact
+→ Prepare Vapi variables
+
+From here:
+→ Twilio SMS #1
+AND
+→ Start Vapi outbound call
+
+Important:
+Twilio SMS and Vapi call should ideally be parallel branches so Twilio output does not overwrite the customer data needed by Vapi.
+
+
+FLOW 2 — DURING-CALL APPOINTMENT AUTOMATION
+-------------------------------------------
+Vapi tool webhook
+→ Normalize / route tool
+→ Check appointment availability OR create appointment
+
+Availability branch:
+Vapi requested day/time
+→ n8n
+→ GHL Get Free Slots
+→ Code node filters only relevant slots
+→ Maximum 1–2 useful slots returned to Vapi
+→ Laura speaks natural appointment times only
+
+Booking branch:
+Customer selects a real slot
+→ Vapi sends exact startTime + GHL contact ID
+→ n8n creates appointment in GHL
+→ GHL returns appointment ID
+→ n8n returns success to Vapi
+→ Laura confirms booking
+→ Confirmation email(s) sent
+
+Important booking issue found:
+The GHL calendar duration must match the appointment duration.
+A 30-minute appointment failed when the selected calendar required a 60-minute duration.
+
+
+FLOW 3 — VAPI CALL SUMMARY TO GHL
+---------------------------------
+Laura call ends
+→ Vapi end-of-call webhook
+→ n8n
+→ Check final report
+→ Prepare GHL call note
+→ Remove duplicates
+→ Save note in the same GHL contact
+→ Create task / additional follow-up actions
+
+A second branch is used for no-appointment follow-up:
+
+Call ends
+→ Check GHL appointments for the contact
+→ Appointment exists?
+   YES = stop reminder
+   NO = wait
+        → Twilio SMS #2
+
+Recommended production improvement:
+After the wait, check GHL appointments again before sending SMS #2.
+
+
+4. IMPORTANT DATA / VARIABLES
+-----------------------------
+Main Vapi variables:
+- first_name
+- full_name
+- property_address
+- email
+- ghl_contact_id
+- is_homeowner
+- roof_type
+
+Important:
+Vapi should not ask homeowner / roof type again if those values are already supplied clearly.
+
+
+5. MAIN PROBLEMS THAT WERE SOLVED
+---------------------------------
+- GHL and Vapi were not connected directly enough for reliable live booking.
+- n8n was added as the bridge for real-time calendar checks and appointment creation.
+- Vapi was initially getting only generic slots instead of the customer's requested day.
+- Appointment tool was updated to pass requestedDay, preference and preferredTime.
+- Slot code was updated to return only a small number of relevant options.
+- Agent prompt was updated so Laura keeps trying another requested day instead of ending the call too early.
+- Agent was updated to stop offering unnecessary team follow-up when another scheduling attempt is possible.
+- GHL form/custom field data was passed properly to Vapi.
+- Homeowner and roof type variables were used to prevent repeated questions.
+- Appointment creation authentication/version issues were fixed.
+- Calendar appointment duration mismatch was identified.
+- Branded appointment confirmation email was added.
+- Twilio A2P 10DLC registration was completed and messaging enabled.
+- SMS #1 and SMS #2 automation was added.
+- Vapi end-of-call webhook authentication issue was fixed.
+- Duplicate call report protection was added with a dedupe key.
+
+
+6. SIMPLE END-TO-END VIEW
+-------------------------
+Customer fills form
+→ GHL creates contact
+→ GHL sends data to n8n
+→ n8n gets complete contact
+→ Twilio sends SMS #1
+→ Vapi / Laura calls customer
+→ Laura checks GHL availability through n8n
+→ Customer chooses appointment
+→ n8n creates appointment in GHL
+→ Vapi confirms appointment
+→ Confirmation email(s) sent
+→ Call ends
+→ n8n saves call summary in GHL
+→ If no appointment, wait and send SMS #2
+
+
+7. WHAT EACH SYSTEM IS RESPONSIBLE FOR
+--------------------------------------
+GHL:
+CRM, form, contacts, calendar, appointment, notes, tasks
+
+n8n:
+Automation logic and integrations
+
+Vapi:
+AI phone conversation
+
+Twilio:
+Phone number + SMS
+
+IONOS SMTP:
+Email delivery
+
+Google Sheets:
+Not used as a core component in the implementation discussed here
+
+OpenClaw:
+Not used as a core component in the implementation discussed here
+
+
+8. CURRENT PROJECT STATUS
+-------------------------
+The core automation is working:
+- Form → GHL → n8n → Vapi
+- First Twilio SMS
+- Laura outbound call
+- Live appointment checking
+- Appointment creation in GHL
+- Confirmation email
+- End-of-call summary to GHL
+- No-appointment follow-up SMS logic
+
+Remaining production improvements:
+- Re-check appointment after the reminder wait before SMS #2
+- Finalize what should happen if the customer still does not book after SMS #2
+- Keep testing the full flow from the real GHL form instead of Vapi web-call tests

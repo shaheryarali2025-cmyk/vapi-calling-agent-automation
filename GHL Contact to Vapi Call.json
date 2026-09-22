@@ -1,0 +1,252 @@
+{
+  "name": "GHL Contact to Vapi Call",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ghl-contact-created",
+        "options": {
+          "responseCode": {
+            "values": {}
+          }
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -272,
+        0
+      ],
+      "id": "ce3c8403-9bfa-459a-a53f-231e8d967643",
+      "name": "GHL Form Webhook",
+      "webhookId": "91d628d4-f0c8-45f2-b907-e021004594b4"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ea4416b4-27e1-4040-be98-c149b6158418",
+              "name": "Contact_ID",
+              "value": "={{ $json.contact.id }}",
+              "type": "string"
+            },
+            {
+              "id": "88e6fda7-0fa7-4fdc-9138-debbcf28bb4c",
+              "name": "Full_Name",
+              "value": "={{ [$json.contact.firstName, $json.contact.lastName].filter(Boolean).join(' ') }}",
+              "type": "string"
+            },
+            {
+              "id": "086de13e-1de2-4e5d-9aa7-5b7109574d66",
+              "name": "Contact_Email",
+              "value": "={{ $json.contact.email }}",
+              "type": "string"
+            },
+            {
+              "id": "beca2fa7-eade-4faf-a3ee-902d60182ef8",
+              "name": "Contact_Phone",
+              "value": "={{ $json.contact.phone }}",
+              "type": "string"
+            },
+            {
+              "id": "70b9cc8f-a63c-4e59-8586-c609dcaed54e",
+              "name": "Property_Address",
+              "value": "={{ [   $json.contact.address1,   $json.contact.city,   $json.contact.state,   $json.contact.postalCode ].filter(Boolean).join(', ') }}",
+              "type": "string"
+            },
+            {
+              "id": "d6c166f0-46b6-410d-a0c0-ef073e15cd3b",
+              "name": "is_Homeowner",
+              "value": "={{ $json.contact.customFields.find(field => field.id === 'WxhM9Snt3DjtZLFqGA1g')?.value || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "76e6d891-e0fa-4ea0-a29f-41e25df96dfe",
+              "name": "=Roof_Type",
+              "value": "={{ $json.contact.customFields.find(field => field.id === 'RYrjqM2rtaXY9YyqpUaM')?.value || '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        176,
+        0
+      ],
+      "id": "94a4872d-ff77-4552-8b98-3a60f56e568f",
+      "name": "Prepare Vapi Variables"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.vapi.ai/call/phone",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  {\n    assistantId: \"7b422fb0-9c7c-4ea5-8fe3-0586109c699c\",\n    phoneNumberId: \"014501ba-5dfa-40d8-a9ea-146c1eaa012d\",\n\n    customer: {\n      number: String(\n        $('Prepare Vapi Variables').first().json.Contact_Phone || \"\"\n      ).trim(),\n\n      name:\n        $('Prepare Vapi Variables').first().json.Full_Name || \"\",\n\n      email:\n        $('Prepare Vapi Variables').first().json.Contact_Email || \"\",\n\n      externalId:\n        $('Prepare Vapi Variables').first().json.Contact_ID || \"\"\n    },\n\n    assistantOverrides: {\n      variableValues: {\n        first_name:\n          (\n            $('Prepare Vapi Variables').first().json.Full_Name || \"\"\n          ).split(\" \")[0],\n\n        full_name:\n          $('Prepare Vapi Variables').first().json.Full_Name || \"\",\n\n        property_address:\n          $('Prepare Vapi Variables').first().json.Property_Address || \"\",\n\n        email:\n          $('Prepare Vapi Variables').first().json.Contact_Email || \"\",\n\n        ghl_contact_id:\n          $('Prepare Vapi Variables').first().json.Contact_ID || \"\",\n\n        is_homeowner:\n          $('Prepare Vapi Variables').first().json.is_Homeowner || \"\",\n\n        roof_type:\n          $('Prepare Vapi Variables').first().json.Roof_Type || \"\"\n      }\n    }\n  }\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        848,
+        0
+      ],
+      "id": "f55bf568-1830-47c3-b308-c7c1c7a4a19a",
+      "name": "Start Vapi Outbound Call",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "Js7UTVKUQ8Y8X8cl",
+          "name": "Bearer Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://services.leadconnectorhq.com/contacts/{{ $json.body.contact.ghl_contact_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer pit-971b02f7-ed9d-45f6-a917-6032d0888e26"
+            },
+            {
+              "name": "Version",
+              "value": "v3"
+            }
+          ]
+        },
+        "options": {
+          "redirect": {}
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -48,
+        0
+      ],
+      "id": "dcd58e96-876b-4414-8173-ad60b06fb7b0",
+      "name": "Get GHL Contact"
+    },
+    {
+      "parameters": {
+        "from": "+13236884880",
+        "to": "={{ $json.Contact_Phone }}",
+        "message": "=Hello {{ $json.Full_Name }}, Thanks for requesting info about SEAL TECH Roof Restorations. Click the link below to see some before and after pics: https://sealtechroof.com/free-inspection\nLaura, our scheduling assistant, will call you shortly to schedule your FREE Roof Inspection!\nReply STOP to opt out.",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        400,
+        0
+      ],
+      "id": "fb3360e4-1707-41b4-98d8-7498a2f58f29",
+      "name": "Send an SMS/MMS/WhatsApp message",
+      "credentials": {
+        "twilioApi": {
+          "id": "1LRJgwsCWBzHTcYy",
+          "name": "Twilio account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 8,
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        624,
+        0
+      ],
+      "id": "8908f155-4db3-43cc-9ffd-157cf7376ca8",
+      "name": "Wait",
+      "webhookId": "7fa09af0-eebf-4699-85e5-dc9b9842f0b6"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "GHL Form Webhook": {
+      "main": [
+        [
+          {
+            "node": "Get GHL Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Vapi Variables": {
+      "main": [
+        [
+          {
+            "node": "Send an SMS/MMS/WhatsApp message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get GHL Contact": {
+      "main": [
+        [
+          {
+            "node": "Prepare Vapi Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send an SMS/MMS/WhatsApp message": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Start Vapi Outbound Call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "44062266-b8f5-4d63-81ce-2a100589a000",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "adfe57bac2d7438517633d2c1f6ded22e16dbad7acbdad4f2a95887b82bb26da"
+  },
+  "nodeGroups": [],
+  "id": "rX8Ii6g3Z36hUEaY",
+  "tags": []
+}

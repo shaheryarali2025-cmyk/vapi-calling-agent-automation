@@ -1,0 +1,73 @@
+# SEAL TECH — GHL, n8n aur Vapi Flow
+
+## 1. Form Submission Flow
+
+Homeowner GoHighLevel form submit karta hai.
+
+**Flow:**  
+`GHL Form Webhook → Get GHL Contact → Prepare Vapi Variables → Start Vapi Outbound Call`
+
+- GHL form se contact create/update hota hai.
+- n8n webhook form submission receive karta hai.
+- n8n GHL se complete contact data leta hai: name, phone, email, address, contact ID, homeowner status aur roof type.
+- `Prepare Vapi Variables` data ko clean format mein convert karta hai.
+- n8n Vapi ko outbound call request bhejta hai.
+- Vapi Laura agent ko customer variables ke saath call start karwata hai.
+
+## 2. During-Call Appointment Flow
+
+**Main flow:**  
+`Vapi Availability Webhook → Normalize Tool Name → Route Vapi Tool`
+
+### Availability check
+
+`Extract Vapi Request → GHL Get Free Slots → Prepare Slots for Vapi → Return Slots to Vapi`
+
+- Vapi customer ka requested day aur time preference n8n ko bhejta hai.
+- n8n GHL Calendar se real free slots leta hai.
+- Code node sirf requested day ke nearest maximum 2 slots select karta hai.
+- Vapi Laura ko natural spoken times return karta hai.
+
+### Appointment booking
+
+`Extract Booking Request → GHL Create Appointment → Prepare Booking Result → Return Booking Result to Vapi`
+
+- Customer ek slot select karta hai.
+- Vapi selected slot aur GHL contact ID n8n ko bhejta hai.
+- n8n appointment GHL Calendar mein create karta hai.
+- Successful result Vapi ko return hota hai.
+- Laura customer ko booking confirm karti hai.
+
+## 3. End-of-Call Report Flow
+
+`Vapi End of Call Webhook → Final Vapi Report Ready → Prepare GHL Call Note → Remove Duplicates → Create Vapi Note in GHL`
+
+- Vapi call end par final report bhejta hai.
+- n8n call summary ko GHL note format mein prepare karta hai.
+- Duplicate notes remove hote hain.
+- Final note GHL contact record mein save hota hai.
+
+## Systems ka role
+
+### GoHighLevel
+- Form aur contact data store karta hai.
+- Custom fields save karta hai.
+- Calendar slots provide karta hai.
+- Appointment create karta hai.
+- Final call note contact record mein save karta hai.
+
+### n8n
+- GHL aur Vapi ke darmiyan automation bridge hai.
+- Data retrieve, clean aur map karta hai.
+- Tool requests route karta hai.
+- Slots filter karta hai.
+- Appointment create karwata hai.
+- Call report GHL mein save karta hai.
+
+### Vapi
+- Laura AI calling agent run karta hai.
+- Customer se conversation karta hai.
+- n8n tools ko call karta hai.
+- Availability options speak karta hai.
+- Selected appointment book karwata hai.
+- End-of-call report generate karta hai.

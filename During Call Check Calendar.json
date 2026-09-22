@@ -1,0 +1,578 @@
+{
+  "name": "During Call Check Calendar",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "during-call-calendar",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1344,
+        48
+      ],
+      "id": "50cd112b-5993-40b8-8a1a-4ed331b64389",
+      "name": "Vapi Availability Webhook",
+      "webhookId": "7f3bf51b-9837-42a1-a533-00e3b6a583b3"
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $json.body ?? $json;\nconst message = payload.message ?? {};\nconst toolCall =\n  message.toolCalls?.[0] ??\n  message.toolCallList?.[0];\nif (!toolCall?.id) {\n  throw new Error('Vapi toolCallId is missing');\n}\nlet args =\n  toolCall.function?.arguments ??\n  toolCall.arguments ??\n  {};\nif (typeof args === 'string') {\n  args = JSON.parse(args);\n}\nconst preference = String(args.preference ?? 'anytime').toLowerCase();\nconst requestedDay = String(args.requestedDay ?? '').trim();\nconst preferredTime = String(args.preferredTime ?? 'none').trim();\n\n// requestedDay ko actual date mein convert karo\nfunction resolveDate(requestedDay) {\n  const now = new Date();\n  const lower = requestedDay.toLowerCase();\n\n  if (lower === 'today') return new Date(now);\n  if (lower === 'tomorrow') {\n    const d = new Date(now);\n    d.setDate(d.getDate() + 1);\n    return d;\n  }\n\n  const dayNames = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];\n  const dayIndex = dayNames.findIndex(d => lower.includes(d));\n  if (dayIndex !== -1) {\n    const currentDay = now.getDay();\n    let daysAhead = dayIndex - currentDay;\n    if (daysAhead <= 0) daysAhead += 7;\n    const target = new Date(now);\n    target.setDate(target.getDate() + daysAhead);\n    return target;\n  }\n\n  const parsed = new Date(requestedDay);\n  if (!isNaN(parsed.getTime())) return parsed;\n\n  return now;\n}\n\nconst targetDate = resolveDate(requestedDay);\n\nconst startOfDay = new Date(targetDate);\nstartOfDay.setHours(0, 0, 0, 0);\n\nconst endOfDay = new Date(targetDate);\nendOfDay.setHours(23, 59, 59, 999);\n\nreturn [\n  {\n    json: {\n      toolCallId: toolCall.id,\n      preference,\n      requestedDay,\n      preferredTime,\n      startDate: Number(startOfDay.getTime()),\n      endDate: Number(endOfDay.getTime()),\n      startDateType: typeof startOfDay.getTime(),\n      endDateType: typeof endOfDay.getTime()\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        -96
+      ],
+      "id": "2db257ee-6ad4-4b89-8c6d-783a162f6610",
+      "name": "Extract Vapi Request"
+    },
+    {
+      "parameters": {
+        "url": "https://services.leadconnectorhq.com/calendars/lDOXfCJ8jOAMFeUHDSlR/free-slots",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "specifyQuery": "json",
+        "jsonQuery": "={{ JSON.stringify({\n  startDate: Number($json.startDate),\n  endDate: Number($json.endDate),\n  timezone: \"America/Los_Angeles\"\n}) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "options": {
+          "redirect": {
+            "redirect": {}
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -448,
+        -96
+      ],
+      "id": "0ccb73ba-dc9c-460f-a190-22c1d2cc289e",
+      "name": "GHL - Get Free Slots",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ibZZXOSmGEPVq83Z",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ghlResponse = $input.first().json;\nconst vapiRequest = $('Extract Vapi Request').first().json;\nconst toolCallId = vapiRequest.toolCallId;\nconst preference = String(vapiRequest.preference ?? 'anytime').toLowerCase();\nconst requestedDay = String(vapiRequest.requestedDay ?? '').trim();\nconst TIMEZONE = 'America/Los_Angeles';\n\n// requestedDay ko actual date string mein resolve karein\nfunction resolveRequestedDate(requestedDay) {\n  const now = new Date();\n  const todayStr = new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(now);\n  const lower = requestedDay.toLowerCase().trim();\n\n  if (lower === 'today') return todayStr;\n  if (lower === 'tomorrow') {\n    const tomorrow = new Date(now);\n    tomorrow.setDate(tomorrow.getDate() + 1);\n    return new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(tomorrow);\n  }\n\n  // Day name check (monday, tuesday etc)\n  const dayNames = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];\n  const dayIndex = dayNames.findIndex(d => lower.includes(d));\n  if (dayIndex !== -1) {\n    const currentDay = now.getDay();\n    let daysAhead = dayIndex - currentDay;\n    if (daysAhead <= 0) daysAhead += 7;\n    const target = new Date(now);\n    target.setDate(target.getDate() + daysAhead);\n    return new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(target);\n  }\n\n  // July 30, July 30th, 2026-07-30 format\n  const parsed = new Date(requestedDay);\n  if (!isNaN(parsed.getTime())) {\n    return new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(parsed);\n  }\n\n  return null;\n}\n\nconst resolvedDate = resolveRequestedDate(requestedDay);\n\nlet allSlots = [];\nfor (const [key, value] of Object.entries(ghlResponse)) {\n  if (key === 'traceId') continue;\n  if (!value || !Array.isArray(value.slots)) continue;\n  for (const slot of value.slots) {\n    if (typeof slot === 'string' && !Number.isNaN(Date.parse(slot))) {\n      allSlots.push(slot);\n    }\n  }\n}\n\n// Duplicate aur past slots remove\nallSlots = [...new Set(allSlots)]\n  .filter((slot) => Date.parse(slot) > Date.now())\n  .sort((a, b) => Date.parse(a) - Date.parse(b));\n\n// Requested day ke mutabiq filter\nif (resolvedDate) {\n  allSlots = allSlots.filter((slot) => slot.startsWith(resolvedDate));\n}\n\nfunction getLocalHour(iso) {\n  const parts = new Intl.DateTimeFormat('en-US', {\n    timeZone: TIMEZONE,\n    hour: 'numeric',\n    hourCycle: 'h23',\n  }).formatToParts(new Date(iso));\n  const hourPart = parts.find((part) => part.type === 'hour');\n  return Number(hourPart?.value);\n}\n\n// Preference filter\nlet preferredSlots = allSlots;\nif (preference === 'morning') {\n  preferredSlots = allSlots.filter((slot) => {\n    const hour = getLocalHour(slot);\n    return hour >= 8 && hour < 12;\n  });\n}\nif (preference === 'afternoon') {\n  preferredSlots = allSlots.filter((slot) => {\n    const hour = getLocalHour(slot);\n    return hour >= 12 && hour < 17;\n  });\n}\n\nconst combinedSlots = [\n  ...preferredSlots,\n  ...allSlots.filter((slot) => !preferredSlots.includes(slot)),\n];\nconst selectedSlots = [...new Set(combinedSlots)].slice(0, 2);\n\nfunction formatSpokenTime(iso) {\n  return new Intl.DateTimeFormat('en-US', {\n    timeZone: TIMEZONE,\n    weekday: 'long',\n    month: 'long',\n    day: 'numeric',\n    hour: 'numeric',\n    minute: '2-digit',\n    hour12: true,\n  }).format(new Date(iso));\n}\n\nlet result;\nif (selectedSlots.length === 0) {\n  result = {\n    success: false,\n    requestedDate: resolvedDate ?? requestedDay,\n    message: 'No appointment slots are currently available for the requested day.',\n  };\n} else {\n  result = {\n    success: true,\n    requestedDate: resolvedDate ?? requestedDay,\n    slots: selectedSlots.map((startTime, index) => ({\n      option: index + 1,\n      spokenTime: formatSpokenTime(startTime),\n      startTime,\n    })),\n    instruction: 'Offer these options to the customer. Speak only spokenTime. Never speak startTime aloud.',\n  };\n}\n\nreturn [\n  {\n    json: {\n      toolCallId,\n      resultText: JSON.stringify(result),\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        -96
+      ],
+      "id": "92089fab-bfdd-4547-b28d-5905e8a06a76",
+      "name": "Prepare Slots for Vapi"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  results: [\n    {\n      toolCallId: $json.toolCallId,\n      result: $json.resultText\n    }\n  ]\n}) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        0,
+        48
+      ],
+      "id": "189b08cf-6193-4166-978f-99d3d9a247ee",
+      "name": "Return Slots to Vapi"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.message.toolCalls[0].function.name }}",
+                    "rightValue": "check_appointment_availability",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "75d42815-b6cd-4836-bd1b-c56e48b3db5b"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Availability"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "7c4ad7a8-8c47-42c3-988f-cff1b20f26f3",
+                    "leftValue": "={{ $json.body.message.toolCalls[0].function.name }}",
+                    "rightValue": "create_ghl_appointment",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": " Create Appointment"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -896,
+        32
+      ],
+      "id": "04ee404f-3eaa-4336-888e-7d5b1e1ef050",
+      "name": "Route Vapi Tool"
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $json.body ?? $json;\nconst message = payload.message ?? {};\nconst toolCall =\n  message.toolCalls?.[0] ??\n  message.toolCallList?.[0];\nif (!toolCall?.id) {\n  throw new Error('Vapi toolCallId is missing');\n}\nlet args =\n  toolCall.function?.arguments ??\n  toolCall.arguments ??\n  {};\nif (typeof args === 'string') {\n  try {\n    args = JSON.parse(args);\n  } catch {\n    throw new Error('Booking tool arguments are not valid JSON');\n  }\n}\nconst contactId = String(\n  args.contactId ??\n  args.contactID ??\n  args.ghl_contact_id ??\n  message.customer?.externalId ??\n  message.call?.customer?.externalId ??\n  ''\n).trim();\nconst startTime = String(\n  args.startTime ?? ''\n).trim();\nif (!contactId) {\n  throw new Error(\n    'GHL contactId is missing. Received arguments: ' +\n    JSON.stringify(args)\n  );\n}\nif (\n  !startTime ||\n  Number.isNaN(Date.parse(startTime))\n) {\n  throw new Error(\n    'Valid appointment startTime is missing. Received arguments: ' +\n    JSON.stringify(args)\n  );\n}\nfunction addMinutesPreservingOffset(iso, minutes) {\n  const newTimestamp =\n    Date.parse(iso) + minutes * 60 * 1000;\n  const offsetMatch =\n    iso.match(/([+-])(\\d{2}):(\\d{2})$/);\n  if (!offsetMatch) {\n    return new Date(newTimestamp).toISOString();\n  }\n  const sign =\n    offsetMatch[1] === '+' ? 1 : -1;\n  const offsetMinutes =\n    sign *\n    (\n      Number(offsetMatch[2]) * 60 +\n      Number(offsetMatch[3])\n    );\n  const localTimestamp =\n    newTimestamp +\n    offsetMinutes * 60 * 1000;\n  return (\n    new Date(localTimestamp)\n      .toISOString()\n      .slice(0, 19) +\n    offsetMatch[0]\n  );\n}\nconst endTime =\n  addMinutesPreservingOffset(startTime, 30);\n\n// Customer details from Vapi payload\nconst variableValues = payload.message?.artifact?.variableValues ?? payload.message?.call?.assistantOverrides?.variableValues ?? {};\nconst contactName = String(message.customer?.name ?? variableValues.full_name ?? '').trim();\nconst contactEmail = String(message.customer?.email ?? variableValues.email ?? '').trim();\nconst propertyAddress = String(variableValues.property_address ?? '').trim();\n\nreturn [\n  {\n    json: {\n      toolCallId: toolCall.id,\n      contactId,\n      startTime,\n      endTime,\n      contactName,\n      contactEmail,\n      propertyAddress\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        96
+      ],
+      "id": "852722db-56d7-4573-aa7a-1dbd051b56fa",
+      "name": "Extract Booking Request"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://services.leadconnectorhq.com/calendars/events/appointments",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer pit-971b02f7-ed9d-45f6-a917-6032d0888e26"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  calendarId: \"lDOXfCJ8jOAMFeUHDSlR\",\n  locationId: \"ZhIDHT6yBbtKWjrKk9Km\",\n  contactId: $json.contactId,\n  title: \"Free Roof Inspection\",\n  startTime: $json.startTime,\n  endTime: new Date(\n  new Date($json.startTime).getTime() + 60 * 60 * 1000\n).toISOString()\n}) }}",
+        "options": {
+          "redirect": {
+            "redirect": {}
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -448,
+        96
+      ],
+      "id": "09cce0fc-fbf6-4772-b397-ccf1d53183af",
+      "name": "GHL - Create Appointment"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ghlResponse = $input.first().json;\nconst bookingRequest = $('Extract Booking Request').first().json;\n\nconst appointmentId =\n  ghlResponse.id ??\n  ghlResponse.appointment?.id ??\n  ghlResponse.event?.id ??\n  '';\n\nconst TIMEZONE = 'America/Los_Angeles';\n\nconst spokenTime = new Intl.DateTimeFormat('en-US', {\n  timeZone: TIMEZONE,\n  weekday: 'long',\n  month: 'long',\n  day: 'numeric',\n  hour: 'numeric',\n  minute: '2-digit',\n  hour12: true\n}).format(new Date(bookingRequest.startTime));\n\nconst result = {\n  success: Boolean(appointmentId),\n  appointmentId,\n  spokenTime,\n  message: appointmentId\n    ? 'Appointment successfully created.'\n    : 'Appointment response did not contain an appointment ID.'\n};\n\nreturn [\n  {\n    json: {\n      toolCallId: bookingRequest.toolCallId,\n      resultText: JSON.stringify(result),\n      contactEmail: bookingRequest.contactEmail ?? '',\n      contactName: bookingRequest.contactName ?? '',\n      propertyAddress: bookingRequest.propertyAddress ?? '',\n      spokenTime: spokenTime\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        96
+      ],
+      "id": "993442c7-a639-46f8-8669-d8b58c0c58f9",
+      "name": "Prepare Booking Result"
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $json.body ?? $json;\nconst message = payload.message ?? {};\n\nconst directCall =\n  message.toolCalls?.[0] ??\n  message.toolCallList?.[0];\n\nconst wrappedCall =\n  message.toolWithToolCallList?.[0];\n\nconst toolCallId =\n  directCall?.id ??\n  wrappedCall?.toolCall?.id ??\n  '';\n\nconst toolName =\n  directCall?.function?.name ??\n  directCall?.name ??\n  wrappedCall?.toolCall?.function?.name ??\n  wrappedCall?.function?.name ??\n  wrappedCall?.name ??\n  'unknown';\n\nif (!toolCallId) {\n  throw new Error(\n    'Fallback request does not contain a Vapi toolCallId'\n  );\n}\n\nconst result = {\n  success: false,\n  toolName,\n  message:\n    'The requested scheduling action could not be processed. Do not claim success. Use the approved failure response.'\n};\n\nreturn [\n  {\n    json: {\n      toolCallId,\n      resultText: JSON.stringify(result)\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        336
+      ],
+      "id": "73ad8ab1-ca97-4686-bb35-6937032cb962",
+      "name": "Prepare Unknown Tool Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "const message =\n  $json.body?.message ??\n  $json.message ??\n  {};\n\nconst toolName =\n  message.toolCalls?.[0]?.function?.name ??\n  message.toolCallList?.[0]?.function?.name ??\n  message.toolWithToolCallList?.[0]?.function?.name ??\n  message.toolWithToolCallList?.[0]?.name ??\n  '';\n\nif (!toolName) {\n  throw new Error(\n    'Vapi tool name not found. Payload: ' +\n    JSON.stringify($json)\n  );\n}\n\nreturn [\n  {\n    json: {\n      ...$json,\n      toolName\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1120,
+        48
+      ],
+      "id": "ecd3df61-60ff-43fc-8183-83809db112cc",
+      "name": "Normalize Tool Name"
+    },
+    {
+      "parameters": {
+        "fromEmail": "appointments@sealtechroof.com",
+        "toEmail": "={{ $json.contactEmail }}",
+        "subject": "Your SEAL TECH Roof Inspection Appointment Is Confirmed",
+        "html": "=<!doctype html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n  <title>SEAL TECH Appointment Confirmation</title>\n</head>\n\n<body style=\"\n  margin:0;\n  padding:0;\n  background-color:#edf2f7;\n  font-family:Arial, Helvetica, sans-serif;\n  color:#24344d;\n\">\n\n  <!-- Hidden preview text -->\n  <div style=\"\n    display:none;\n    max-height:0;\n    overflow:hidden;\n    opacity:0;\n    color:transparent;\n  \">\n    Your SEAL TECH roof inspection appointment is confirmed.\n  </div>\n\n  <table\n    role=\"presentation\"\n    width=\"100%\"\n    cellspacing=\"0\"\n    cellpadding=\"0\"\n    border=\"0\"\n    style=\"background-color:#edf2f7;\"\n  >\n    <tr>\n      <td align=\"center\" style=\"padding:30px 12px;\">\n\n        <table\n          role=\"presentation\"\n          width=\"100%\"\n          cellspacing=\"0\"\n          cellpadding=\"0\"\n          border=\"0\"\n          style=\"\n            width:100%;\n            max-width:640px;\n            background-color:#ffffff;\n            border-radius:12px;\n            overflow:hidden;\n            box-shadow:0 8px 28px rgba(15,42,85,0.13);\n          \"\n        >\n\n          <!-- Top contact bar -->\n          <tr>\n            <td\n              align=\"right\"\n              style=\"\n                background-color:#122f5d;\n                padding:12px 28px;\n              \"\n            >\n              <a\n                href=\"mailto:info@sealtechroof.com\"\n                style=\"\n                  color:#ffffff;\n                  font-size:13px;\n                  font-weight:600;\n                  text-decoration:none;\n                \"\n              >\n                info@sealtechroof.com\n              </a>\n            </td>\n          </tr>\n\n          <!-- Logo -->\n          <tr>\n            <td\n              align=\"center\"\n              style=\"\n                background-color:#ffffff;\n                padding:24px 20px;\n              \"\n            >\n              <img\n                src=\"https://sealtechroof.com/wp-content/uploads/2020/02/Seal-tech-logo-transparent-PNG-01.png\"\n                width=\"250\"\n                alt=\"SEAL TECH\"\n                style=\"\n                  display:block;\n                  width:250px;\n                  max-width:82%;\n                  height:auto;\n                  border:0;\n                  outline:none;\n                  text-decoration:none;\n                \"\n              >\n            </td>\n          </tr>\n\n          <!-- Hero section -->\n          <tr>\n            <td\n              background=\"https://sealtechroof.com/wp-content/uploads/2026/03/Rectangle-38.png\"\n              style=\"\n                background-color:#071b39;\n                background-image:\n                  linear-gradient(\n                    rgba(4,20,45,0.84),\n                    rgba(4,20,45,0.88)\n                  ),\n                  url('https://sealtechroof.com/wp-content/uploads/2026/03/Rectangle-38.png');\n                background-position:center;\n                background-size:cover;\n                background-repeat:no-repeat;\n              \"\n            >\n\n              <!-- Outlook background support -->\n              <!--[if gte mso 9]>\n              <v:rect\n                xmlns:v=\"urn:schemas-microsoft-com:vml\"\n                fill=\"true\"\n                stroke=\"false\"\n                style=\"width:640px;height:285px;\"\n              >\n                <v:fill\n                  type=\"frame\"\n                  src=\"https://sealtechroof.com/wp-content/uploads/2026/03/Rectangle-38.png\"\n                  color=\"#071b39\"\n                />\n                <v:textbox inset=\"0,0,0,0\">\n              <![endif]-->\n\n              <table\n                role=\"presentation\"\n                width=\"100%\"\n                cellspacing=\"0\"\n                cellpadding=\"0\"\n                border=\"0\"\n              >\n                <tr>\n                  <td\n                    style=\"\n                      background-color:rgba(4,20,45,0.82);\n                      padding:58px 36px;\n                      text-align:left;\n                    \"\n                  >\n\n                    <h1 style=\"\n                      margin:0 0 16px 0;\n                      color:#ffffff;\n                      font-size:36px;\n                      line-height:1.15;\n                      font-weight:800;\n                    \">\n                      Your Appointment Is\n                      <span style=\"color:#ff003c;\">\n                        Confirmed\n                      </span>\n                    </h1>\n\n                    <p style=\"\n                      margin:0;\n                      max-width:500px;\n                      color:#e8eef8;\n                      font-size:16px;\n                      line-height:1.7;\n                    \">\n                      Thank you for choosing SEAL TECH. Your roof inspection\n                      appointment has been successfully scheduled.\n                    </p>\n\n                  </td>\n                </tr>\n              </table>\n\n              <!--[if gte mso 9]>\n                </v:textbox>\n              </v:rect>\n              <![endif]-->\n\n            </td>\n          </tr>\n\n          <!-- Main content -->\n          <tr>\n            <td style=\"padding:38px 34px 20px 34px;\">\n\n              <p style=\"\n                margin:0 0 18px 0;\n                color:#263b5a;\n                font-size:17px;\n                line-height:1.6;\n              \">\n                Hi\n                <strong>\n                  {{ $json.contactName || 'there' }}\n                </strong>,\n              </p>\n\n              <p style=\"\n                margin:0 0 26px 0;\n                color:#58677d;\n                font-size:15px;\n                line-height:1.75;\n              \">\n                Your SEAL TECH roof inspection appointment has been\n                successfully booked. Please review the appointment details\n                below.\n              </p>\n\n              <!-- Appointment details -->\n              <table\n                role=\"presentation\"\n                width=\"100%\"\n                cellspacing=\"0\"\n                cellpadding=\"0\"\n                border=\"0\"\n                style=\"\n                  background-color:#f4f7fb;\n                  border:1px solid #d9e2ee;\n                  border-top:4px solid #ff003c;\n                  border-radius:8px;\n                \"\n              >\n                <tr>\n                  <td style=\"padding:26px;\">\n\n                    <p style=\"\n                      margin:0 0 7px 0;\n                      color:#73839b;\n                      font-size:12px;\n                      font-weight:700;\n                      letter-spacing:0.8px;\n                      text-transform:uppercase;\n                    \">\n                      Date and Time\n                    </p>\n\n                    <p style=\"\n                      margin:0 0 24px 0;\n                      color:#122f5d;\n                      font-size:20px;\n                      line-height:1.4;\n                      font-weight:700;\n                    \">\n                      {{ $json.spokenTime }}\n                    </p>\n\n                    <div style=\"\n                      height:1px;\n                      background-color:#dce4ee;\n                      margin:0 0 22px 0;\n                    \"></div>\n\n                    <p style=\"\n                      margin:0 0 7px 0;\n                      color:#73839b;\n                      font-size:12px;\n                      font-weight:700;\n                      letter-spacing:0.8px;\n                      text-transform:uppercase;\n                    \">\n                      Property Address\n                    </p>\n\n                    <p style=\"\n                      margin:0;\n                      color:#122f5d;\n                      font-size:16px;\n                      line-height:1.55;\n                      font-weight:600;\n                    \">\n                      {{ $json.propertyAddress }}\n                    </p>\n\n                  </td>\n                </tr>\n              </table>\n\n              <p style=\"\n                margin:28px 0 0 0;\n                color:#58677d;\n                font-size:15px;\n                line-height:1.75;\n              \">\n                A SEAL TECH representative will inspect the property and help\n                determine which roof restoration options may be appropriate.\n              </p>\n\n              <p style=\"\n                margin:15px 0 12px 0;\n                color:#58677d;\n                font-size:15px;\n                line-height:1.75;\n              \">\n                Please make sure the property is accessible at the scheduled\n                appointment time.\n              </p>\n\n              <p style=\"\n                margin:25px 0 8px 0;\n                color:#263b5a;\n                font-size:15px;\n                line-height:1.7;\n              \">\n                Thank you,\n              </p>\n\n              <p style=\"\n                margin:0 0 15px 0;\n                color:#122f5d;\n                font-size:16px;\n                font-weight:700;\n              \">\n                SEAL TECH Roof Restoration\n              </p>\n\n            </td>\n          </tr>\n\n          <!-- Footer -->\n          <tr>\n            <td\n              align=\"center\"\n              style=\"\n                background-color:#071b39;\n                padding:27px 24px;\n              \"\n            >\n\n              <p style=\"\n                margin:0 0 8px 0;\n                color:#ffffff;\n                font-size:15px;\n                font-weight:700;\n              \">\n                SEAL TECH Roof Restoration\n              </p>\n\n              <p style=\"\n                margin:0 0 13px 0;\n                color:#b9c7d9;\n                font-size:12px;\n                line-height:1.6;\n              \">\n                Professional roof inspection and restoration solutions.\n              </p>\n\n              <p style=\"\n                margin:0;\n                color:#b9c7d9;\n                font-size:12px;\n                line-height:1.6;\n              \">\n                <a\n                  href=\"mailto:info@sealtechroof.com\"\n                  style=\"\n                    color:#52b8ff;\n                    text-decoration:none;\n                  \"\n                >\n                  info@sealtechroof.com\n                </a>\n\n                &nbsp;&nbsp;|&nbsp;&nbsp;\n\n                <a\n                  href=\"https://sealtechroof.com/\"\n                  target=\"_blank\"\n                  style=\"\n                    color:#52b8ff;\n                    text-decoration:none;\n                  \"\n                >\n                  sealtechroof.com\n                </a>\n              </p>\n\n            </td>\n          </tr>\n\n        </table>\n\n      </td>\n    </tr>\n  </table>\n\n</body>\n</html>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        224,
+        192
+      ],
+      "id": "435fd646-7cc5-4d6f-a4fc-de8959ffa704",
+      "name": "Send an Email",
+      "webhookId": "2ad09cc9-95e5-4f4a-9f35-7257c3c35a3e",
+      "credentials": {
+        "smtp": {
+          "id": "bPzJV95l40KkW947",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "8c4613cd-db77-48b9-9d1f-b84f2698766f",
+              "leftValue": "={{    JSON.parse($json.resultText).success === true &&   Boolean(JSON.parse($json.resultText).appointmentId) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        0,
+        240
+      ],
+      "id": "70f24aaf-aaa1-4fc7-9e01-7cd328b3abf7",
+      "name": "If"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        224,
+        384
+      ],
+      "id": "6d85213f-f21d-4df5-b0bc-f93f12d6f5e0",
+      "name": "No Operation, do nothing"
+    },
+    {
+      "parameters": {
+        "fromEmail": "appointments@sealtechroof.com",
+        "toEmail": "=samir.bhana@westcoastroofingla.com",
+        "subject": "=New Roof Inspection Assigned — {{ $('If').item.json.contactName }} — {{ $('If').item.json.spokenTime }}",
+        "html": "=<!doctype html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n  <title>New Roof Inspection Assignment</title>\n</head>\n\n<body style=\"\n  margin:0;\n  padding:0;\n  background-color:#edf2f7;\n  font-family:Arial, Helvetica, sans-serif;\n  color:#24344d;\n\">\n\n  <div style=\"\n    display:none;\n    max-height:0;\n    overflow:hidden;\n    opacity:0;\n    color:transparent;\n  \">\n    A new SEAL TECH roof inspection has been assigned to you.\n  </div>\n\n  <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\"\n         style=\"background-color:#edf2f7;\">\n    <tr>\n      <td align=\"center\" style=\"padding:30px 12px;\">\n\n        <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\"\n               style=\"\n                 width:100%;\n                 max-width:640px;\n                 background-color:#ffffff;\n                 border-radius:12px;\n                 overflow:hidden;\n                 box-shadow:0 8px 28px rgba(15,42,85,0.13);\n               \">\n\n          <tr>\n            <td align=\"right\" style=\"background-color:#122f5d; padding:12px 28px;\">\n              <a href=\"mailto:info@sealtechroof.com\"\n                 style=\"color:#ffffff; font-size:13px; font-weight:600; text-decoration:none;\">\n                info@sealtechroof.com\n              </a>\n            </td>\n          </tr>\n\n          <tr>\n            <td align=\"center\" style=\"background-color:#ffffff; padding:24px 20px;\">\n              <img\n                src=\"https://sealtechroof.com/wp-content/uploads/2020/02/Seal-tech-logo-transparent-PNG-01.png\"\n                width=\"250\"\n                alt=\"SEAL TECH\"\n                style=\"\n                  display:block;\n                  width:250px;\n                  max-width:82%;\n                  height:auto;\n                  border:0;\n                \"\n              >\n            </td>\n          </tr>\n\n          <tr>\n            <td\n              background=\"https://sealtechroof.com/wp-content/uploads/2026/03/Rectangle-38.png\"\n              style=\"\n                background-color:#071b39;\n                background-image:\n                  linear-gradient(\n                    rgba(4,20,45,0.84),\n                    rgba(4,20,45,0.88)\n                  ),\n                  url('https://sealtechroof.com/wp-content/uploads/2026/03/Rectangle-38.png');\n                background-position:center;\n                background-size:cover;\n                background-repeat:no-repeat;\n              \"\n            >\n\n              <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\">\n                <tr>\n                  <td style=\"\n                    background-color:rgba(4,20,45,0.82);\n                    padding:58px 36px;\n                    text-align:left;\n                  \">\n\n                    <h1 style=\"\n                      margin:0 0 16px 0;\n                      color:#ffffff;\n                      font-size:36px;\n                      line-height:1.15;\n                      font-weight:800;\n                    \">\n                      New Inspection\n                      <span style=\"color:#ff003c;\">Assigned</span>\n                    </h1>\n\n                    <p style=\"\n                      margin:0;\n                      max-width:500px;\n                      color:#e8eef8;\n                      font-size:16px;\n                      line-height:1.7;\n                    \">\n                      A new SEAL TECH roof inspection appointment has been\n                      assigned to you.\n                    </p>\n\n                  </td>\n                </tr>\n              </table>\n\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:38px 34px 20px 34px;\">\n\n              <p style=\"\n                margin:0 0 18px 0;\n                color:#263b5a;\n                font-size:17px;\n                line-height:1.6;\n              \">\n                Hi <strong>Samir</strong>,\n              </p>\n\n              <p style=\"\n                margin:0 0 26px 0;\n                color:#58677d;\n                font-size:15px;\n                line-height:1.75;\n              \">\n                A new roof inspection appointment has been booked and assigned\n                to you. Please review the appointment information below.\n              </p>\n\n              <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\"\n                     style=\"\n                       background-color:#f4f7fb;\n                       border:1px solid #d9e2ee;\n                       border-top:4px solid #ff003c;\n                       border-radius:8px;\n                     \">\n                <tr>\n                  <td style=\"padding:26px;\">\n\n                    <p style=\"\n                      margin:0 0 7px 0;\n                      color:#73839b;\n                      font-size:12px;\n                      font-weight:700;\n                      letter-spacing:0.8px;\n                      text-transform:uppercase;\n                    \">\n                      Contact Name\n                    </p>\n\n                    <p style=\"\n                      margin:0 0 22px 0;\n                      color:#122f5d;\n                      font-size:18px;\n                      line-height:1.4;\n                      font-weight:700;\n                    \">\n                      {{ $('If').item.json.contactName }}\n                    </p>\n\n                    <div style=\"height:1px; background-color:#dce4ee; margin:0 0 20px 0;\"></div>\n\n                    <p style=\"\n                      margin:0 0 7px 0;\n                      color:#73839b;\n                      font-size:12px;\n                      font-weight:700;\n                      letter-spacing:0.8px;\n                      text-transform:uppercase;\n                    \">\n                      Contact Email\n                    </p>\n\n                    <p style=\"\n                      margin:0 0 22px 0;\n                      color:#122f5d;\n                      font-size:16px;\n                      line-height:1.5;\n                      font-weight:600;\n                    \">\n                      <a href=\"mailto:{{ $('If').item.json.contactEmail }}\"\n                         style=\"color:#168bd2; text-decoration:none;\">\n                        {{ $('If').item.json.contactEmail }}\n                      </a>\n                    </p>\n\n                    <div style=\"height:1px; background-color:#dce4ee; margin:0 0 20px 0;\"></div>\n\n                    <p style=\"\n                      margin:0 0 7px 0;\n                      color:#73839b;\n                      font-size:12px;\n                      font-weight:700;\n                      letter-spacing:0.8px;\n                      text-transform:uppercase;\n                    \">\n                      Appointment Time\n                    </p>\n\n                    <p style=\"\n                      margin:0 0 22px 0;\n                      color:#122f5d;\n                      font-size:18px;\n                      line-height:1.4;\n                      font-weight:700;\n                    \">\n                    {{ $('If').item.json.spokenTime }}\n                    </p>\n\n                    <div style=\"height:1px; background-color:#dce4ee; margin:0 0 20px 0;\"></div>\n\n                    <p style=\"\n                      margin:0 0 7px 0;\n                      color:#73839b;\n                      font-size:12px;\n                      font-weight:700;\n                      letter-spacing:0.8px;\n                      text-transform:uppercase;\n                    \">\n                      Property Address\n                    </p>\n\n                    <p style=\"\n                      margin:0;\n                      color:#122f5d;\n                      font-size:16px;\n                      line-height:1.55;\n                      font-weight:600;\n                    \">\n                      {{ $('If').item.json.propertyAddress }}\n                    </p>\n\n                  </td>\n                </tr>\n              </table>\n\n              <p style=\"\n                margin:27px 0 0 0;\n                color:#58677d;\n                font-size:15px;\n                line-height:1.75;\n              \">\n                Please contact the homeowner directly if any appointment\n                coordination or additional property information is required.\n              </p>\n\n              <p style=\"\n                margin:15px 0 12px 0;\n                color:#58677d;\n                font-size:15px;\n                line-height:1.75;\n              \">\n                Please notify SEAL TECH as soon as possible if the scheduled\n                appointment cannot be completed.\n              </p>\n\n              <p style=\"\n                margin:25px 0 8px 0;\n                color:#263b5a;\n                font-size:15px;\n              \">\n                Thank you,\n              </p>\n\n              <p style=\"\n                margin:0 0 15px 0;\n                color:#122f5d;\n                font-size:16px;\n                font-weight:700;\n              \">\n                SEAL TECH Roof Restoration\n              </p>\n\n            </td>\n          </tr>\n\n          <tr>\n            <td align=\"center\" style=\"background-color:#071b39; padding:27px 24px;\">\n\n              <p style=\"\n                margin:0 0 8px 0;\n                color:#ffffff;\n                font-size:15px;\n                font-weight:700;\n              \">\n                SEAL TECH Roof Restoration\n              </p>\n\n              <p style=\"\n                margin:0 0 13px 0;\n                color:#b9c7d9;\n                font-size:12px;\n                line-height:1.6;\n              \">\n                Professional roof inspection and restoration solutions.\n              </p>\n\n              <p style=\"margin:0; color:#b9c7d9; font-size:12px;\">\n                <a href=\"mailto:info@sealtechroof.com\"\n                   style=\"color:#52b8ff; text-decoration:none;\">\n                  info@sealtechroof.com\n                </a>\n                &nbsp;&nbsp;|&nbsp;&nbsp;\n                <a href=\"https://sealtechroof.com/\"\n                   style=\"color:#52b8ff; text-decoration:none;\">\n                  sealtechroof.com\n                </a>\n              </p>\n\n            </td>\n          </tr>\n\n        </table>\n\n      </td>\n    </tr>\n  </table>\n\n</body>\n</html>",
+        "options": {
+          "ccEmail": "bilalanalyst39@gmail.com"
+        }
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        448,
+        192
+      ],
+      "id": "8f511746-df86-4678-b0e9-9fff227bc084",
+      "name": "Send an Email1",
+      "webhookId": "2ad09cc9-95e5-4f4a-9f35-7257c3c35a3e",
+      "credentials": {
+        "smtp": {
+          "id": "bPzJV95l40KkW947",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "appointments@sealtechroof.com",
+        "toEmail": "=ray@Sealtechroof.com",
+        "subject": "=New SEAL TECH Appointment Booked — {{ $('If').item.json.contactName }}",
+        "html": "=<!doctype html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n  <title>New Appointment Booked</title>\n</head>\n\n<body style=\"\n  margin:0;\n  padding:0;\n  background-color:#edf2f7;\n  font-family:Arial, Helvetica, sans-serif;\n  color:#24344d;\n\">\n\n  <div style=\"\n    display:none;\n    max-height:0;\n    overflow:hidden;\n    opacity:0;\n    color:transparent;\n  \">\n    A new SEAL TECH roof inspection appointment has been booked.\n  </div>\n\n  <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\"\n         style=\"background-color:#edf2f7;\">\n    <tr>\n      <td align=\"center\" style=\"padding:30px 12px;\">\n\n        <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\"\n               style=\"\n                 width:100%;\n                 max-width:640px;\n                 background-color:#ffffff;\n                 border-radius:12px;\n                 overflow:hidden;\n                 box-shadow:0 8px 28px rgba(15,42,85,0.13);\n               \">\n\n          <tr>\n            <td align=\"right\" style=\"background-color:#122f5d; padding:12px 28px;\">\n              <a href=\"mailto:info@sealtechroof.com\"\n                 style=\"color:#ffffff; font-size:13px; font-weight:600; text-decoration:none;\">\n                info@sealtechroof.com\n              </a>\n            </td>\n          </tr>\n\n          <tr>\n            <td align=\"center\" style=\"background-color:#ffffff; padding:24px 20px;\">\n              <img\n                src=\"https://sealtechroof.com/wp-content/uploads/2020/02/Seal-tech-logo-transparent-PNG-01.png\"\n                width=\"250\"\n                alt=\"SEAL TECH\"\n                style=\"\n                  display:block;\n                  width:250px;\n                  max-width:82%;\n                  height:auto;\n                  border:0;\n                \"\n              >\n            </td>\n          </tr>\n\n          <tr>\n            <td\n              background=\"https://sealtechroof.com/wp-content/uploads/2026/03/Rectangle-38.png\"\n              style=\"\n                background-color:#071b39;\n                background-image:\n                  linear-gradient(\n                    rgba(4,20,45,0.84),\n                    rgba(4,20,45,0.88)\n                  ),\n                  url('https://sealtechroof.com/wp-content/uploads/2026/03/Rectangle-38.png');\n                background-position:center;\n                background-size:cover;\n                background-repeat:no-repeat;\n              \"\n            >\n\n              <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\">\n                <tr>\n                  <td style=\"\n                    background-color:rgba(4,20,45,0.82);\n                    padding:58px 36px;\n                    text-align:left;\n                  \">\n\n                    <h1 style=\"\n                      margin:0 0 16px 0;\n                      color:#ffffff;\n                      font-size:36px;\n                      line-height:1.15;\n                      font-weight:800;\n                    \">\n                      New Appointment\n                      <span style=\"color:#ff003c;\">Booked</span>\n                    </h1>\n\n                    <p style=\"\n                      margin:0;\n                      max-width:500px;\n                      color:#e8eef8;\n                      font-size:16px;\n                      line-height:1.7;\n                    \">\n                      A new SEAL TECH roof inspection appointment has been\n                      successfully scheduled.\n                    </p>\n\n                  </td>\n                </tr>\n              </table>\n\n            </td>\n          </tr>\n\n          <tr>\n            <td style=\"padding:38px 34px 20px 34px;\">\n\n              <p style=\"\n                margin:0 0 18px 0;\n                color:#263b5a;\n                font-size:17px;\n                line-height:1.6;\n              \">\n                Hi <strong>Ray</strong>,\n              </p>\n\n              <p style=\"\n                margin:0 0 26px 0;\n                color:#58677d;\n                font-size:15px;\n                line-height:1.75;\n              \">\n                A roof inspection appointment has been booked for\n                <strong>{{ $json.contactName }}</strong> and assigned to\n                contractor <strong>Samir Bhana</strong>.\n              </p>\n\n              <table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\"\n                     style=\"\n                       background-color:#f4f7fb;\n                       border:1px solid #d9e2ee;\n                       border-top:4px solid #ff003c;\n                       border-radius:8px;\n                     \">\n                <tr>\n                  <td style=\"padding:26px;\">\n\n                    <p style=\"\n                      margin:0 0 7px 0;\n                      color:#73839b;\n                      font-size:12px;\n                      font-weight:700;\n                      letter-spacing:0.8px;\n                      text-transform:uppercase;\n                    \">\n                      Contact Name\n                    </p>\n\n                    <p style=\"\n                      margin:0 0 22px 0;\n                      color:#122f5d;\n                      font-size:18px;\n                      line-height:1.4;\n                      font-weight:700;\n                    \">\n                      {{ $('If').item.json.contactName }}\n                    </p>\n\n                    <div style=\"height:1px; background-color:#dce4ee; margin:0 0 20px 0;\"></div>\n\n                    <p style=\"\n                      margin:0 0 7px 0;\n                      color:#73839b;\n                      font-size:12px;\n                      font-weight:700;\n                      letter-spacing:0.8px;\n                      text-transform:uppercase;\n                    \">\n                      Contact Email\n                    </p>\n\n                    <p style=\"\n                      margin:0 0 22px 0;\n                      color:#122f5d;\n                      font-size:16px;\n                      line-height:1.5;\n                      font-weight:600;\n                    \">\n                      <a href=\"mailto:{{ $('If').item.json.contactEmail }}\"\n                         style=\"color:#122f5d; text-decoration:none;\">\n                        {{ $('If').item.json.contactEmail }}\n                      </a>\n                    </p>\n\n                    <div style=\"height:1px; background-color:#dce4ee; margin:0 0 20px 0;\"></div>\n\n                    <p style=\"\n                      margin:0 0 7px 0;\n                      color:#73839b;\n                      font-size:12px;\n                      font-weight:700;\n                      letter-spacing:0.8px;\n                      text-transform:uppercase;\n                    \">\n                      Appointment Time\n                    </p>\n\n                    <p style=\"\n                      margin:0 0 22px 0;\n                      color:#122f5d;\n                      font-size:18px;\n                      line-height:1.4;\n                      font-weight:700;\n                    \">\n                          {{ $('If').item.json.spokenTime }}        </p>\n\n                    <div style=\"height:1px; background-color:#dce4ee; margin:0 0 20px 0;\"></div>\n\n                    <p style=\"\n                      margin:0 0 7px 0;\n                      color:#73839b;\n                      font-size:12px;\n                      font-weight:700;\n                      letter-spacing:0.8px;\n                      text-transform:uppercase;\n                    \">\n                      Property Address\n                    </p>\n\n                    <p style=\"\n                      margin:0 0 22px 0;\n                      color:#122f5d;\n                      font-size:16px;\n                      line-height:1.55;\n                      font-weight:600;\n                    \">{{ $('If').item.json.propertyAddress }}\n                    \n                    </p>\n\n                    <div style=\"height:1px; background-color:#dce4ee; margin:0 0 20px 0;\"></div>\n\n                    <p style=\"\n                      margin:0 0 7px 0;\n                      color:#73839b;\n                      font-size:12px;\n                      font-weight:700;\n                      letter-spacing:0.8px;\n                      text-transform:uppercase;\n                    \">\n                      Assigned Contractor\n                    </p>\n\n                    <p style=\"\n                      margin:0 0 5px 0;\n                      color:#122f5d;\n                      font-size:17px;\n                      line-height:1.5;\n                      font-weight:700;\n                    \">\n                      Samir Bhana\n                    </p>\n\n                    <p style=\"\n                      margin:0;\n                      color:#58677d;\n                      font-size:15px;\n                      line-height:1.5;\n                    \">\n                      <a href=\"mailto:samir.bhana@westcoastroofingla.com\"\n                         style=\"color:#168bd2; text-decoration:none;\">\n                        samir.bhana@westcoastroofingla.com\n                      </a>\n                    </p>\n\n                  </td>\n                </tr>\n              </table>\n\n              <p style=\"\n                margin:27px 0 10px 0;\n                color:#58677d;\n                font-size:15px;\n                line-height:1.75;\n              \">\n                The contact and contractor have been notified of the scheduled\n                appointment.\n              </p>\n\n              <p style=\"\n                margin:25px 0 8px 0;\n                color:#263b5a;\n                font-size:15px;\n              \">\n                Thank you,\n              </p>\n\n              <p style=\"\n                margin:0 0 15px 0;\n                color:#122f5d;\n                font-size:16px;\n                font-weight:700;\n              \">\n                SEAL TECH Automation\n              </p>\n\n            </td>\n          </tr>\n\n          <tr>\n            <td align=\"center\" style=\"background-color:#071b39; padding:27px 24px;\">\n\n              <p style=\"\n                margin:0 0 8px 0;\n                color:#ffffff;\n                font-size:15px;\n                font-weight:700;\n              \">\n                SEAL TECH Roof Restoration\n              </p>\n\n              <p style=\"\n                margin:0 0 13px 0;\n                color:#b9c7d9;\n                font-size:12px;\n                line-height:1.6;\n              \">\n                Professional roof inspection and restoration solutions.\n              </p>\n\n              <p style=\"margin:0; color:#b9c7d9; font-size:12px;\">\n                <a href=\"mailto:info@sealtechroof.com\"\n                   style=\"color:#52b8ff; text-decoration:none;\">\n                  info@sealtechroof.com\n                </a>\n                &nbsp;&nbsp;|&nbsp;&nbsp;\n                <a href=\"https://sealtechroof.com/\"\n                   style=\"color:#52b8ff; text-decoration:none;\">\n                  sealtechroof.com\n                </a>\n              </p>\n\n            </td>\n          </tr>\n\n        </table>\n\n      </td>\n    </tr>\n  </table>\n\n</body>\n</html>",
+        "options": {
+          "ccEmail": "bilalanalyst39@gmail.com"
+        }
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        672,
+        192
+      ],
+      "id": "86e525ed-1b03-4eb5-b427-115f6986c61f",
+      "name": "Send an Email2",
+      "webhookId": "2ad09cc9-95e5-4f4a-9f35-7257c3c35a3e",
+      "credentials": {
+        "smtp": {
+          "id": "bPzJV95l40KkW947",
+          "name": "SMTP account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Vapi Availability Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Tool Name",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Vapi Request": {
+      "main": [
+        [
+          {
+            "node": "GHL - Get Free Slots",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL - Get Free Slots": {
+      "main": [
+        [
+          {
+            "node": "Prepare Slots for Vapi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Slots for Vapi": {
+      "main": [
+        [
+          {
+            "node": "Return Slots to Vapi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Vapi Tool": {
+      "main": [
+        [
+          {
+            "node": "Extract Vapi Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Extract Booking Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Unknown Tool Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Booking Request": {
+      "main": [
+        [
+          {
+            "node": "GHL - Create Appointment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL - Create Appointment": {
+      "main": [
+        [
+          {
+            "node": "Prepare Booking Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Booking Result": {
+      "main": [
+        [
+          {
+            "node": "Return Slots to Vapi",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Unknown Tool Response": {
+      "main": [
+        [
+          {
+            "node": "Return Slots to Vapi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Tool Name": {
+      "main": [
+        [
+          {
+            "node": "Route Vapi Tool",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Return Slots to Vapi": {
+      "main": [
+        []
+      ]
+    },
+    "Send an Email": {
+      "main": [
+        [
+          {
+            "node": "Send an Email1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Send an Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Operation, do nothing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send an Email1": {
+      "main": [
+        [
+          {
+            "node": "Send an Email2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "a0353ec1-ff49-4e96-87fe-b423e4630dff",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "adfe57bac2d7438517633d2c1f6ded22e16dbad7acbdad4f2a95887b82bb26da"
+  },
+  "nodeGroups": [],
+  "id": "LRudV7D04ytFbL89",
+  "tags": []
+}
